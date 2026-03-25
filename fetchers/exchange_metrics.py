@@ -1,4 +1,8 @@
-"""交易所指标 Fetcher — DEX/CEX 渗透率 + Hyperliquid 份额追踪"""
+"""交易所指标 Fetcher — DEX/CEX 渗透率 + Hyperliquid 份额追踪
+
+每小时：轻量指标（BN vol + HL meta + DFL vol/OI = 5 次 API）
+每4小时：重量指标（94个 builder market candleSnapshot = ~96 次 HL API）
+"""
 
 import logging
 import time
@@ -17,13 +21,25 @@ DFL_API = "https://api.llama.fi"
 # Builder market non-crypto categories
 NONCRYPTO_CATS = {"stocks", "commodities", "indices", "fx"}
 
+# Non-crypto candleSnapshot 每 4 次才跑（4h 一次）
+NONCRYPTO_EVERY_N = 4
+
 
 class ExchangeMetricsFetcher(BaseFetcher):
     name = "exchange_metrics"
     interval_seconds = 3600  # 1 hour
 
+    def __init__(self, db):
+        super().__init__(db)
+        self._run_count = 0
+        # Cache last non-crypto values for non-heavy runs
+        self._last_noncrypto_vol = 0.0
+        self._last_stock_vol = 0.0
+
     def _run(self) -> int:
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        self._run_count += 1
+        is_heavy = (self._run_count % NONCRYPTO_EVERY_N == 1)  # 1st, 5th, 9th...
 
         with httpx.Client(timeout=30) as client:
             bn_vol = self._fetch_bn_volume(client)
@@ -32,8 +48,14 @@ class ExchangeMetricsFetcher(BaseFetcher):
             dfl_vol = self._fetch_dfl_derivatives(client)
             dfl_oi = self._fetch_dfl_oi(client)
 
-            # Non-crypto volume from builder markets (candleSnapshot)
-            noncrypto_vol, stock_vol = self._fetch_noncrypto_volume(client, hl_cats)
+            if is_heavy:
+                noncrypto_vol, stock_vol = self._fetch_noncrypto_volume(client, hl_cats)
+                self._last_noncrypto_vol = noncrypto_vol
+                self._last_stock_vol = stock_vol
+                logger.info("[exchange_metrics] Heavy run: fetched builder market candles")
+            else:
+                noncrypto_vol = self._last_noncrypto_vol
+                stock_vol = self._last_stock_vol
 
         # ── Compute metrics ──
 
@@ -99,8 +121,9 @@ class ExchangeMetricsFetcher(BaseFetcher):
         ))
         self.db.commit()
 
+        mode = "heavy" if is_heavy else "light"
         logger.info(
-            f"[exchange_metrics] DEX/BN={dex_bn_penetration:.1f}% "
+            f"[exchange_metrics] ({mode}) DEX/BN={dex_bn_penetration:.1f}% "
             f"HYPE_vol={hype_vol_share:.1f}% OI={hype_oi_share:.1f}% "
             f"non-crypto={hype_noncrypto_pct:.1f}% stock=${stock_vol:,.0f}"
         )
