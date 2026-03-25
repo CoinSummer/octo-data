@@ -33,6 +33,7 @@ from fetchers.tweets import TweetsFetcher
 from fetchers.kb_news import KBNewsFetcher
 from fetchers.reddit import RedditFetcher
 from fetchers.hl_announcements import HLAnnouncementsFetcher
+from fetchers.odaily_announcements import OdailyAnnouncementsFetcher
 from classifier import run_classifier
 
 logging.basicConfig(
@@ -49,6 +50,7 @@ def main():
         "prices", "fear_greed", "funding_rates", "stablecoin",
         "dominance", "defi_tvl", "defi_yields", "polymarket",
         "tweets", "kb_news", "reddit", "hl_announcements",
+        "odaily_announcements",
     ]
     parser.add_argument("--fetch", choices=all_fetchers, help="只跑一次指定 fetcher")
     parser.add_argument("--classify", action="store_true", help="只跑一次 classifier")
@@ -81,6 +83,7 @@ def main():
             "kb_news": KBNewsFetcher,
             "reddit": RedditFetcher,
             "hl_announcements": HLAnnouncementsFetcher,
+            "odaily_announcements": OdailyAnnouncementsFetcher,
         }
         fetcher = fetcher_map[args.fetch](db)
         count = fetcher.fetch_and_save()

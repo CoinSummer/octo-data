@@ -1,7 +1,7 @@
-"""Hyperliquid 公告 Fetcher — 轮询 Telegram 公开频道
+"""Odaily Seer 快讯 Fetcher — 轮询 Telegram 公开频道
 
-数据源：https://t.me/s/hyperliquid_announcements（服务端渲染 HTML，无需认证）
-写入 announcements 表，source='hyperliquid' 区分 Binance。
+数据源：https://t.me/s/Odaily_Seer（服务端渲染 HTML，无需认证）
+写入 announcements 表，source='odaily'。
 """
 
 import logging
@@ -13,16 +13,16 @@ from .base import BaseFetcher, normalize_ts
 
 logger = logging.getLogger(__name__)
 
-CHANNEL_URL = "https://t.me/s/hyperliquid_announcements"
+CHANNEL_URL = "https://t.me/s/Odaily_Seer"
+CHANNEL_NAME = "Odaily_Seer"
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
-# 匹配单条消息块：从 data-post 到下一个 data-post 或页面结尾
 _MSG_PATTERN = re.compile(
-    r'data-post="hyperliquid_announcements/(\d+)"'  # post_id
+    r'data-post="' + CHANNEL_NAME + r'/(\d+)"'  # post_id
     r'.*?'
-    r'tgme_widget_message_text[^>]*>(.*?)</div>'     # 消息正文 HTML
+    r'tgme_widget_message_text[^>]*>(.*?)</div>'  # 消息正文 HTML
     r'.*?'
-    r'datetime="([^"]+)"',                            # ISO 时间戳
+    r'datetime="([^"]+)"',                         # ISO 时间戳
     re.DOTALL,
 )
 
@@ -60,10 +60,10 @@ def _make_title(text: str, max_len: int = 120) -> str:
     return first_line[:max_len - 3] + "..."
 
 
-class HLAnnouncementsFetcher(BaseFetcher):
-    """Hyperliquid 公告 — 轮询 Telegram 频道，每 30 分钟。"""
+class OdailyAnnouncementsFetcher(BaseFetcher):
+    """Odaily Seer 快讯 — 轮询 Telegram 频道，每 30 分钟。"""
 
-    name = "hl_announcements"
+    name = "odaily_announcements"
     interval_seconds = 1800  # 30min
 
     def _run(self) -> int:
@@ -77,23 +77,22 @@ class HLAnnouncementsFetcher(BaseFetcher):
 
         messages = _parse_messages(resp.text)
         if not messages:
-            logger.warning("[hl_announcements] No messages parsed")
+            logger.warning("[odaily_announcements] No messages parsed")
             return 0
 
         count = 0
         for msg in messages:
-            # 解析时间: 2026-03-19T07:49:46+00:00 → YYYY-MM-DD HH:MM:SS
             ts = normalize_ts(msg["ts"])
             title = _make_title(msg["text"])
             body_text = msg["text"]
             post_id = msg["post_id"]
 
-            url = f"https://t.me/hyperliquid_announcements/{post_id}" if post_id else ""
+            url = f"https://t.me/{CHANNEL_NAME}/{post_id}" if post_id else ""
 
             self.db.execute("""
                 INSERT OR IGNORE INTO announcements
                     (ts, catalog_id, catalog_name, title, body, body_text, code, source, url)
-                VALUES (?, 0, 'Hyperliquid', ?, '', ?, ?, 'hyperliquid', ?)
+                VALUES (?, 0, 'Odaily', ?, '', ?, ?, 'odaily', ?)
             """, (ts, title, body_text, post_id, url))
             count += 1
 

@@ -41,4 +41,4 @@ BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 
 # External integrations (optional — Slack bot, DeFi analyzers)
-EXTERNAL_SCRIPTS_DIR = os.getenv("DATAHUB_SCRIPTS_DIR", "")
+EXTERNAL_SCRIPTS_DIR = os.getenv("DATAHUB_SCRIPTS_DIR", "/Users/june/投资的一切/7-scripts/data-hub")

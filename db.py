@@ -158,7 +158,12 @@ class Database:
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_ann_ts ON announcements(ts DESC)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_ann_catalog ON announcements(catalog_name, ts DESC)")
-        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_ann_dedup ON announcements(title, ts)")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_ann_dedup2 ON announcements(title, ts, source)")
+        # 清理旧索引（不含 source）
+        try:
+            cur.execute("DROP INDEX IF EXISTS idx_ann_dedup")
+        except Exception:
+            pass
 
         # 确保 announcements 有 topics 列（兼容旧 DB）
         try:
@@ -169,6 +174,12 @@ class Database:
         # 确保 announcements 有 source 列（binance/hyperliquid，兼容旧 DB）
         try:
             cur.execute("ALTER TABLE announcements ADD COLUMN source TEXT DEFAULT 'binance'")
+        except Exception:
+            pass  # 已存在
+
+        # 确保 announcements 有 url 列
+        try:
+            cur.execute("ALTER TABLE announcements ADD COLUMN url TEXT DEFAULT ''")
         except Exception:
             pass  # 已存在
 
@@ -263,6 +274,47 @@ class Database:
             )
         """)
 
+        # ── 交易所指标（DEX/CEX 渗透率 + HYPE 份额）──
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS exchange_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TIMESTAMP NOT NULL,
+                dex_deriv_vol_24h REAL,
+                bn_futures_vol_24h REAL,
+                hype_vol_24h REAL,
+                hype_oi REAL,
+                hype_vol_share REAL,
+                hype_oi_share REAL,
+                hype_noncrypto_pct REAL,
+                hype_stock_vol_24h REAL,
+                dex_bn_penetration REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_em_dedup ON exchange_metrics(ts)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_em_ts ON exchange_metrics(ts DESC)")
+
+        # ── 事件记忆（三层河流模型：structural/trend/event）──
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS monitor_events (
+                event_key TEXT PRIMARY KEY,
+                level TEXT NOT NULL DEFAULT 'event',
+                title TEXT NOT NULL,
+                facts TEXT NOT NULL DEFAULT '[]',
+                first_seen TIMESTAMP NOT NULL,
+                last_pushed TIMESTAMP NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active'
+            )
+        """)
+
+        # 兼容旧表：加 level 列
+        try:
+            cur.execute("ALTER TABLE monitor_events ADD COLUMN level TEXT NOT NULL DEFAULT 'event'")
+        except Exception:
+            pass
+
         self.conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
@@ -310,6 +362,7 @@ class Database:
             "prices", "fear_greed", "funding_rates", "stablecoin",
             "dominance", "defi_tvl", "defi_yields", "announcements",
             "polymarket_markets", "tweets", "kb_news", "reddit_posts",
+            "exchange_metrics",
         ]
         stats = []
         for t in tables:

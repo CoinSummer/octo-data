@@ -20,6 +20,9 @@ from fetchers.tweets import TweetsFetcher
 from fetchers.kb_news import KBNewsFetcher
 from fetchers.reddit import RedditFetcher
 from fetchers.hl_announcements import HLAnnouncementsFetcher
+from fetchers.okx_announcements import OKXAnnouncementsFetcher
+from fetchers.odaily_announcements import OdailyAnnouncementsFetcher
+from fetchers.exchange_metrics import ExchangeMetricsFetcher
 from classifier import run_classifier
 
 logger = logging.getLogger(__name__)
@@ -37,6 +40,9 @@ ALL_FETCHERS = [
     KBNewsFetcher,           # 30 min
     RedditFetcher,           # 1 hour
     HLAnnouncementsFetcher,  # 30 min
+    OKXAnnouncementsFetcher,    # 30 min
+    OdailyAnnouncementsFetcher, # 30 min
+    ExchangeMetricsFetcher,     # 1 hour
 ]
 
 
@@ -103,8 +109,36 @@ def start_scheduler(db: Database) -> BackgroundScheduler:
             id="defi_monitor",
             name="defi_monitor",
             replace_existing=True,
+            misfire_grace_time=300,
         )
         logger.info("Scheduled [defi_monitor] every 4h")
+
+        # Crypto Monitor — 每 4h 运行（持仓+主题信号监控）
+        def _run_crypto_monitor():
+            try:
+                result = subprocess.run(
+                    [sys.executable,
+                     str(Path(EXTERNAL_SCRIPTS_DIR) / "analyzers" / "crypto_monitor.py"),
+                     "--hours", "4"],
+                    capture_output=True, text=True, timeout=300,
+                    env=_make_subprocess_env(), cwd=EXTERNAL_SCRIPTS_DIR,
+                )
+                logger.info(f"[crypto_monitor] {result.stdout.strip()}")
+                if result.returncode != 0:
+                    logger.error(f"[crypto_monitor] stderr: {result.stderr[:500]}")
+            except Exception as e:
+                logger.error(f"[crypto_monitor] failed: {e}")
+
+        scheduler.add_job(
+            _run_crypto_monitor,
+            trigger="interval",
+            seconds=4 * 3600,
+            id="crypto_monitor",
+            name="crypto_monitor",
+            replace_existing=True,
+            misfire_grace_time=300,
+        )
+        logger.info("Scheduled [crypto_monitor] every 4h")
 
         # DeFi Review — 每天 06:00 运行（nightly 审视管线质量）
         def _run_defi_review():
@@ -129,8 +163,36 @@ def start_scheduler(db: Database) -> BackgroundScheduler:
             id="defi_review",
             name="defi_review",
             replace_existing=True,
+            misfire_grace_time=300,
         )
         logger.info("Scheduled [defi_review] daily at 06:00")
+
+        # Crypto Review — 每天 06:30 运行（审视河流分析质量）
+        def _run_crypto_review():
+            try:
+                result = subprocess.run(
+                    [sys.executable,
+                     str(Path(EXTERNAL_SCRIPTS_DIR) / "analyzers" / "crypto_review.py")],
+                    capture_output=True, text=True, timeout=900,
+                    env=_make_subprocess_env(), cwd=EXTERNAL_SCRIPTS_DIR,
+                )
+                logger.info(f"[crypto_review] {result.stdout.strip()}")
+                if result.returncode != 0:
+                    logger.error(f"[crypto_review] stderr: {result.stderr[:500]}")
+            except Exception as e:
+                logger.error(f"[crypto_review] failed: {e}")
+
+        scheduler.add_job(
+            _run_crypto_review,
+            trigger="cron",
+            hour=6,
+            minute=30,
+            id="crypto_review",
+            name="crypto_review",
+            replace_existing=True,
+            misfire_grace_time=300,
+        )
+        logger.info("Scheduled [crypto_review] daily at 06:30")
     else:
         logger.info("External scripts skipped (DATAHUB_SCRIPTS_DIR not set)")
 

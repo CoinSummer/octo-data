@@ -239,9 +239,9 @@ def create_app(db: Database) -> FastAPI:
     @app.get("/announcements/latest")
     def announcements_latest(
         limit: int = Query(20),
-        source: Optional[str] = Query(None, description="binance or hyperliquid"),
+        source: Optional[str] = Query(None, description="binance, hyperliquid, or okx"),
     ):
-        sql = "SELECT id, ts, catalog_name, title, body_text, source, created_at FROM announcements WHERE 1=1"
+        sql = "SELECT id, ts, catalog_name, title, body_text, source, url, created_at FROM announcements WHERE 1=1"
         params = []
         if source:
             sql += " AND source = ?"
@@ -256,10 +256,10 @@ def create_app(db: Database) -> FastAPI:
         day: Optional[str] = Query(None),
         catalog: Optional[str] = Query(None, description="New Cryptocurrency Listing"),
         keyword: Optional[str] = Query(None),
-        source: Optional[str] = Query(None, description="binance or hyperliquid"),
+        source: Optional[str] = Query(None, description="binance, hyperliquid, or okx"),
         limit: int = Query(50),
     ):
-        sql = "SELECT id, ts, catalog_name, title, body_text, source, created_at FROM announcements WHERE 1=1"
+        sql = "SELECT id, ts, catalog_name, title, body_text, source, url, created_at FROM announcements WHERE 1=1"
         params = []
 
         if day:
@@ -501,10 +501,12 @@ def create_app(db: Database) -> FastAPI:
         # announcements (extra hardcoded LIKE patterns are safe — not user input)
         queries.append(f"""
             SELECT 'announcements' AS source, ts, topics,
-                   title || CASE WHEN body_text != '' THEN char(10) || SUBSTR(body_text, 1, 2000) ELSE '' END AS text,
-                   catalog_name AS author,
-                   CASE WHEN code != '' THEN 'https://www.binance.com/en/support/announcement/' || code
-                        ELSE '' END AS url
+                   title || CASE WHEN body_text != '' AND url != body_text THEN char(10) || SUBSTR(body_text, 1, 2000) ELSE '' END AS text,
+                   catalog_name || ' (' || source || ')' AS author,
+                   COALESCE(NULLIF(url, ''),
+                        CASE WHEN code != '' AND source = 'binance' THEN 'https://www.binance.com/en/support/announcement/' || code
+                             WHEN code != '' AND source = 'hyperliquid' THEN 'https://t.me/hyperliquid_announcements/' || code
+                             ELSE '' END) AS url
             FROM announcements
             WHERE ts > ? AND ({topic_placeholders}
                   OR title LIKE '%Earn%' OR title LIKE '%Super%'
@@ -538,6 +540,32 @@ def create_app(db: Database) -> FastAPI:
         all_params = per_query_params * 4 + [limit]
         sql = " UNION ALL ".join(queries) + " ORDER BY ts DESC LIMIT ?"
         rows = db.fetchall(sql, tuple(all_params))
+        return {"data": rows, "total": len(rows)}
+
+    # ── Exchange Metrics ──
+
+    @app.get("/exchange-metrics/latest")
+    def exchange_metrics_latest():
+        row = db.fetchone("SELECT * FROM exchange_metrics ORDER BY ts DESC LIMIT 1")
+        return {"data": row}
+
+    @app.get("/exchange-metrics")
+    def exchange_metrics_history(
+        start: Optional[str] = Query(None, alias="from"),
+        to: Optional[str] = Query(None),
+        limit: int = Query(720, description="默认 720 条 = 30 天"),
+    ):
+        sql = "SELECT * FROM exchange_metrics WHERE 1=1"
+        params = []
+        if start:
+            sql += " AND ts >= ?"
+            params.append(start)
+        if to:
+            sql += " AND ts <= ?"
+            params.append(to)
+        sql += " ORDER BY ts DESC LIMIT ?"
+        params.append(limit)
+        rows = db.fetchall(sql, tuple(params))
         return {"data": rows, "total": len(rows)}
 
     # ── System ──

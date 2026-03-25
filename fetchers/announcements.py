@@ -174,9 +174,11 @@ class AnnouncementsFetcher:
             catalog_name = data.get("catalogName", "")
             code = data.get("code", "")
 
+            url = f"https://www.binance.com/en/support/announcement/{code}" if code else ""
+
             self.db.execute("""
-                INSERT OR IGNORE INTO announcements (ts, catalog_id, catalog_name, title, body, body_text, code)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO announcements (ts, catalog_id, catalog_name, title, body, body_text, code, url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 ts,
                 data.get("catalogId", 0),
@@ -185,6 +187,7 @@ class AnnouncementsFetcher:
                 body,
                 body_text,
                 code,
+                url,
             ))
             self.db.commit()
             self.db.update_fetcher_status(self.name, success=True)

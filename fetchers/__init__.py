@@ -11,6 +11,9 @@ from .tweets import TweetsFetcher
 from .kb_news import KBNewsFetcher
 from .reddit import RedditFetcher
 from .hl_announcements import HLAnnouncementsFetcher
+from .okx_announcements import OKXAnnouncementsFetcher
+from .odaily_announcements import OdailyAnnouncementsFetcher
+from .exchange_metrics import ExchangeMetricsFetcher
 
 __all__ = [
     "PricesFetcher",
@@ -26,4 +29,7 @@ __all__ = [
     "TweetsFetcher",
     "KBNewsFetcher",
     "RedditFetcher",
+    "OKXAnnouncementsFetcher",
+    "OdailyAnnouncementsFetcher",
+    "ExchangeMetricsFetcher",
 ]
