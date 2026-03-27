@@ -588,4 +588,24 @@ def create_app(db: Database) -> FastAPI:
     def tables():
         return {"data": db.table_stats()}
 
+    # ── Monitor Events ──
+
+    @app.get("/events")
+    def events(
+        status: str = Query("active", description="active / expired / all"),
+        limit: int = Query(50),
+    ):
+        """monitor_events 表：Crypto/DeFi Monitor 提取的事件记忆。"""
+        if status == "all":
+            rows = db.fetchall(
+                "SELECT * FROM monitor_events ORDER BY last_pushed DESC LIMIT ?",
+                (limit,),
+            )
+        else:
+            rows = db.fetchall(
+                "SELECT * FROM monitor_events WHERE status = ? ORDER BY last_pushed DESC LIMIT ?",
+                (status, limit),
+            )
+        return {"data": rows}
+
     return app
