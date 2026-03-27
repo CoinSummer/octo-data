@@ -65,19 +65,19 @@ def classify_batch(texts: list) -> list:
     try:
         result = subprocess.run(
             ["claude", "--print", "--model", CLASSIFIER_MODEL, "-p", prompt],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=120,
             env=env,
         )
         if result.returncode != 0:
             logger.warning(f"claude subprocess failed: {result.stderr[:200]}")
-            return [""] * len(texts)
+            return [("", "")] * len(texts)
         return parse_response(result.stdout, len(texts))
     except subprocess.TimeoutExpired:
         logger.warning("claude subprocess timed out")
-        return [""] * len(texts)
+        return [("", "")] * len(texts)
     except FileNotFoundError:
         logger.error("claude CLI not found in PATH")
-        return [""] * len(texts)
+        return [("", "")] * len(texts)
 
 
 def run_classifier(db: Database) -> int:
