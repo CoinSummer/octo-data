@@ -16,8 +16,12 @@ logger = logging.getLogger(__name__)
 
 
 def parse_response(text: str, expected: int) -> list:
-    """解析 LLM 响应 '1: defi,crypto\\n2: macro\\n...'，返回 topics 列表。"""
-    results = [""] * expected
+    """解析 LLM 响应，返回 (topics, entities) 元组列表。
+
+    新格式: '1: topics=defi,crypto | entities=pendle,eth'
+    旧格式兼容: '1: defi,crypto'
+    """
+    results = [("", "")] * expected
     for line in text.strip().splitlines():
         line = line.strip()
         if not line:
@@ -27,10 +31,28 @@ def parse_response(text: str, expected: int) -> list:
             continue
         idx = int(m.group(1)) - 1
         raw = m.group(2).strip()
-        if 0 <= idx < expected and raw:
+        if not (0 <= idx < expected) or not raw:
+            continue
+
+        # 新格式: topics=... | entities=...
+        if "topics=" in raw:
+            topics_str = ""
+            entities_str = ""
+            for part in raw.split("|"):
+                part = part.strip()
+                if part.startswith("topics="):
+                    topics_str = part[len("topics="):]
+                elif part.startswith("entities="):
+                    entities_str = part[len("entities="):]
+            topics = [t.strip().lower() for t in topics_str.split(",") if t.strip()]
+            topics = [t for t in topics if t in VALID_TOPICS]
+            entities = [e.strip().lower() for e in entities_str.split(",") if e.strip()]
+            results[idx] = (",".join(topics), ",".join(entities))
+        else:
+            # 旧格式兼容: 纯 topics
             topics = [t.strip().lower() for t in raw.split(",")]
             topics = [t for t in topics if t in VALID_TOPICS]
-            results[idx] = ",".join(topics)
+            results[idx] = (",".join(topics), "")
     return results
 
 
@@ -77,10 +99,10 @@ def run_classifier(db: Database) -> int:
             texts = [r["text"] or "" for r in batch]
             results = classify_batch(texts)
 
-            for row, topics in zip(batch, results):
+            for row, (topics, entities) in zip(batch, results):
                 db.execute(
-                    f"UPDATE {table} SET topics = ? WHERE {id_col} = ?",
-                    (topics or "_none", row["row_id"]),
+                    f"UPDATE {table} SET topics = ?, entities = ? WHERE {id_col} = ?",
+                    (topics or "_none", entities, row["row_id"]),
                 )
             db.commit()
 
@@ -93,3 +115,57 @@ def run_classifier(db: Database) -> int:
         logger.debug("[classifier] No unclassified records")
 
     return total
+
+
+def reclassify_missing_entities(db: Database, limit: int = 0) -> int:
+    """重分类 entities 为空但 topics 已有的记录（补提 entities）。"""
+    total = 0
+
+    for table, text_col, id_col in TEXT_TABLES:
+        sql = (
+            f"SELECT {id_col} AS row_id, {text_col} AS text FROM {table} "
+            f"WHERE (entities = '' OR entities IS NULL) AND topics != '' AND topics IS NOT NULL AND topics != '_none'"
+        )
+        if limit:
+            sql += f" LIMIT {limit}"
+        rows = db.fetchall(sql)
+        if not rows:
+            continue
+
+        logger.info(f"[reclassify] {table}: {len(rows)} records missing entities")
+
+        for i in range(0, len(rows), CLASSIFIER_BATCH_SIZE):
+            batch = rows[i:i + CLASSIFIER_BATCH_SIZE]
+            texts = [r["text"] or "" for r in batch]
+            results = classify_batch(texts)
+
+            for row, (topics, entities) in zip(batch, results):
+                db.execute(
+                    f"UPDATE {table} SET topics = ?, entities = ? WHERE {id_col} = ?",
+                    (topics or "_none", entities, row["row_id"]),
+                )
+            db.commit()
+
+        total += len(rows)
+
+    if total:
+        logger.info(f"[reclassify] Done: {total} records updated with entities")
+    return total
+
+
+if __name__ == "__main__":
+    import sys
+    logging.basicConfig(level=logging.INFO)
+    from db import Database
+    db = Database()
+    db.connect()
+
+    if len(sys.argv) > 1 and sys.argv[1] == "reclassify":
+        limit = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+        n = reclassify_missing_entities(db, limit=limit)
+        print(f"Reclassified {n} records")
+    else:
+        n = run_classifier(db)
+        print(f"Classified {n} records")
+
+    db.close()

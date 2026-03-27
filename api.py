@@ -480,27 +480,37 @@ def create_app(db: Database) -> FastAPI:
     @app.get("/signals")
     def signals_query(
         topics: str = Query("earn,defi", description="逗号分隔的 topic 过滤"),
+        entity: Optional[str] = Query(None, description="按实体过滤，逗号分隔"),
         since: Optional[str] = Query(None, description="起始时间 YYYY-MM-DD HH:MM:SS"),
         hours: int = Query(4, description="如果没指定 since，回溯 N 小时"),
         limit: int = Query(100),
     ):
-        """跨表查询已分类的文本信号，按 topics 过滤。"""
+        """跨表查询已分类的文本信号，按 topics/entities 过滤。"""
         topic_list = [t.strip() for t in topics.split(",") if t.strip()]
         topic_placeholders = " OR ".join("topics LIKE ?" for _ in topic_list)
         topic_params = [f"%{t}%" for t in topic_list]
+
+        # 可选 entity 过滤
+        entity_filter = ""
+        entity_params = []
+        if entity:
+            entity_list = [e.strip().lower() for e in entity.split(",") if e.strip()]
+            if entity_list:
+                entity_filter = " AND (" + " OR ".join("entities LIKE ?" for _ in entity_list) + ")"
+                entity_params = [f"%{e}%" for e in entity_list]
 
         if since:
             cutoff = since
         else:
             cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime('%Y-%m-%d %H:%M:%S')
 
-        per_query_params = [cutoff] + topic_params
+        per_query_params = [cutoff] + topic_params + entity_params
 
         queries = []
 
-        # announcements (extra hardcoded LIKE patterns are safe — not user input)
+        # announcements
         queries.append(f"""
-            SELECT 'announcements' AS source, ts, topics,
+            SELECT 'announcements' AS source, ts, topics, entities,
                    title || CASE WHEN body_text != '' AND url != body_text THEN char(10) || SUBSTR(body_text, 1, 2000) ELSE '' END AS text,
                    catalog_name || ' (' || source || ')' AS author,
                    COALESCE(NULLIF(url, ''),
@@ -508,33 +518,31 @@ def create_app(db: Database) -> FastAPI:
                              WHEN code != '' AND source = 'hyperliquid' THEN 'https://t.me/hyperliquid_announcements/' || code
                              ELSE '' END) AS url
             FROM announcements
-            WHERE ts > ? AND ({topic_placeholders}
-                  OR title LIKE '%Earn%' OR title LIKE '%Super%'
-                  OR title LIKE '%Launchpool%' OR title LIKE '%HODLer%')
+            WHERE ts > ? AND ({topic_placeholders}){entity_filter}
         """)
 
         # tweets
         queries.append(f"""
-            SELECT 'tweets' AS source, ts, topics, content AS text,
+            SELECT 'tweets' AS source, ts, topics, entities, content AS text,
                    username AS author, source_url AS url
             FROM tweets
-            WHERE ts > ? AND ({topic_placeholders})
+            WHERE ts > ? AND ({topic_placeholders}){entity_filter}
         """)
 
         # kb_news
         queries.append(f"""
-            SELECT 'kb_news' AS source, ts, topics,
+            SELECT 'kb_news' AS source, ts, topics, entities,
                    subject || CASE WHEN content != '' THEN char(10) || SUBSTR(content, 1, 500) ELSE '' END AS text,
                    source_name AS author, source_url AS url
             FROM kb_news
-            WHERE ts > ? AND ({topic_placeholders})
+            WHERE ts > ? AND ({topic_placeholders}){entity_filter}
         """)
 
         # reddit
         queries.append(f"""
-            SELECT 'reddit' AS source, ts, topics, title AS text, author, url
+            SELECT 'reddit' AS source, ts, topics, entities, title AS text, author, url
             FROM reddit_posts
-            WHERE ts > ? AND ({topic_placeholders})
+            WHERE ts > ? AND ({topic_placeholders}){entity_filter}
         """)
 
         all_params = per_query_params * 4 + [limit]

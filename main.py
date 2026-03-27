@@ -111,13 +111,18 @@ def main():
     if EXTERNAL_SCRIPTS_DIR:
         _slack_env = _os.environ.copy()
         _slack_env.setdefault("HOME", str(Path.home()))
+        _log_dir = Path(__file__).parent
         _slack_proc = subprocess.Popen(
             [sys.executable, "-c",
-             f"import sys; sys.path.insert(0, {EXTERNAL_SCRIPTS_DIR!r});"
+             "import sys, logging; "
+             f"sys.path.insert(0, {EXTERNAL_SCRIPTS_DIR!r}); "
+             "logging.basicConfig(level=logging.INFO, "
+             "format='%(asctime)s [%(levelname)s] %(name)s: %(message)s', "
+             "datefmt='%H:%M:%S'); "
              "from slack_bot import SlackBot; bot = SlackBot(); bot._run()"],
             env=_slack_env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stdout=open(_log_dir / "slack_bot.log", "a"),
+            stderr=subprocess.STDOUT,
         )
         logger.info(f"Slack bot subprocess started (pid={_slack_proc.pid})")
     else:

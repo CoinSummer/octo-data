@@ -183,6 +183,12 @@ class Database:
         except Exception:
             pass  # 已存在
 
+        # 确保 announcements 有 entities 列
+        try:
+            cur.execute("ALTER TABLE announcements ADD COLUMN entities TEXT DEFAULT ''")
+        except Exception:
+            pass  # 已存在
+
         # ── Tweets (KB API) ──
 
         cur.execute("""
@@ -202,6 +208,12 @@ class Database:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tweets_ts ON tweets(ts DESC)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_tweets_user ON tweets(username, ts DESC)")
 
+        # 确保 tweets 有 entities 列
+        try:
+            cur.execute("ALTER TABLE tweets ADD COLUMN entities TEXT DEFAULT ''")
+        except Exception:
+            pass
+
         # ── KB News ──
 
         cur.execute("""
@@ -218,6 +230,12 @@ class Database:
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_kbn_ts ON kb_news(ts DESC)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_kbn_source ON kb_news(source_name, ts DESC)")
+
+        # 确保 kb_news 有 entities 列
+        try:
+            cur.execute("ALTER TABLE kb_news ADD COLUMN entities TEXT DEFAULT ''")
+        except Exception:
+            pass
 
         # ── Reddit ──
 
@@ -238,6 +256,12 @@ class Database:
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_reddit_ts ON reddit_posts(ts DESC)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_reddit_sub ON reddit_posts(subreddit, ts DESC)")
+
+        # 确保 reddit_posts 有 entities 列
+        try:
+            cur.execute("ALTER TABLE reddit_posts ADD COLUMN entities TEXT DEFAULT ''")
+        except Exception:
+            pass
 
         # ── Polymarket ──
 

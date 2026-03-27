@@ -507,7 +507,7 @@ def cmd_signals(args):
     ]:
         rows = db.fetchall(
             f"SELECT '{table}' as source, ts, {text_col} as text, "
-            f"{author_col} as author, topics, {url_col} as url "
+            f"{author_col} as author, topics, entities, {url_col} as url "
             f"FROM {table} "
             f"WHERE ts >= ? AND ({topic_placeholders}) "
             f"ORDER BY ts DESC LIMIT 50",

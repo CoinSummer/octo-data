@@ -42,7 +42,7 @@ ALL_FETCHERS = [
     HLAnnouncementsFetcher,  # 30 min
     OKXAnnouncementsFetcher,    # 30 min
     OdailyAnnouncementsFetcher, # 30 min
-    ExchangeMetricsFetcher,     # 1 hour
+    # ExchangeMetricsFetcher,     # 1 hour — 暂停：HL API 限流影响交易
 ]
 
 
