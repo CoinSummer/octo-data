@@ -23,6 +23,8 @@ from fetchers.hl_announcements import HLAnnouncementsFetcher
 from fetchers.okx_announcements import OKXAnnouncementsFetcher
 from fetchers.odaily_announcements import OdailyAnnouncementsFetcher
 from fetchers.exchange_metrics import ExchangeMetricsFetcher
+from fetchers.latepost import LatePostFetcher
+from fetchers.rss_feeds import RSSFeedsFetcher
 from classifier import run_classifier
 
 logger = logging.getLogger(__name__)
@@ -42,6 +44,8 @@ ALL_FETCHERS = [
     HLAnnouncementsFetcher,  # 30 min
     OKXAnnouncementsFetcher,    # 30 min
     OdailyAnnouncementsFetcher, # 30 min
+    LatePostFetcher,            # 2 hour
+    RSSFeedsFetcher,            # 2 hour (36kr, TechCrunch, HN, Meta Eng)
     # ExchangeMetricsFetcher,     # 1 hour — 暂停：HL API 限流影响交易
 ]
 
@@ -140,6 +144,33 @@ def start_scheduler(db: Database) -> BackgroundScheduler:
         )
         logger.info("Scheduled [crypto_monitor] every 4h")
 
+        # Stock Monitor — 每 12h 运行（河流模型持仓信号监控）
+        def _run_stock_monitor():
+            try:
+                result = subprocess.run(
+                    [sys.executable,
+                     str(Path(EXTERNAL_SCRIPTS_DIR) / "analyzers" / "stock_monitor.py"),
+                     "--hours", "12"],
+                    capture_output=True, text=True, timeout=300,
+                    env=_make_subprocess_env(), cwd=EXTERNAL_SCRIPTS_DIR,
+                )
+                logger.info(f"[stock_monitor] {result.stdout.strip()}")
+                if result.returncode != 0:
+                    logger.error(f"[stock_monitor] stderr: {result.stderr[:500]}")
+            except Exception as e:
+                logger.error(f"[stock_monitor] failed: {e}")
+
+        scheduler.add_job(
+            _run_stock_monitor,
+            trigger="interval",
+            seconds=12 * 3600,
+            id="stock_monitor",
+            name="stock_monitor",
+            replace_existing=True,
+            misfire_grace_time=300,
+        )
+        logger.info("Scheduled [stock_monitor] every 12h")
+
         # DeFi Review — 每天 06:00 运行（nightly 审视管线质量）
         def _run_defi_review():
             try:
@@ -193,6 +224,33 @@ def start_scheduler(db: Database) -> BackgroundScheduler:
             misfire_grace_time=300,
         )
         logger.info("Scheduled [crypto_review] daily at 06:30")
+
+        # Stock Review — 每天 07:00 运行（审视河流分析质量）
+        def _run_stock_review():
+            try:
+                result = subprocess.run(
+                    [sys.executable,
+                     str(Path(EXTERNAL_SCRIPTS_DIR) / "analyzers" / "stock_review.py")],
+                    capture_output=True, text=True, timeout=900,
+                    env=_make_subprocess_env(), cwd=EXTERNAL_SCRIPTS_DIR,
+                )
+                logger.info(f"[stock_review] {result.stdout.strip()}")
+                if result.returncode != 0:
+                    logger.error(f"[stock_review] stderr: {result.stderr[:500]}")
+            except Exception as e:
+                logger.error(f"[stock_review] failed: {e}")
+
+        scheduler.add_job(
+            _run_stock_review,
+            trigger="cron",
+            hour=7,
+            minute=0,
+            id="stock_review",
+            name="stock_review",
+            replace_existing=True,
+            misfire_grace_time=300,
+        )
+        logger.info("Scheduled [stock_review] daily at 07:00")
     else:
         logger.info("External scripts skipped (DATAHUB_SCRIPTS_DIR not set)")
 
