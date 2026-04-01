@@ -281,6 +281,46 @@ def create_app(db: Database) -> FastAPI:
         rows = db.fetchall(sql, tuple(params))
         return {"data": rows, "total": len(rows)}
 
+    # ── News（一般媒体） ──
+
+    @app.get("/news/latest")
+    def news_latest(
+        limit: int = Query(20),
+        source: Optional[str] = Query(None, description="36kr, techcrunch, hackernews, latepost, odaily"),
+    ):
+        sql = "SELECT id, ts, catalog_name, title, body_text, source, url, created_at FROM news WHERE 1=1"
+        params = []
+        if source:
+            sql += " AND source = ?"
+            params.append(source)
+        sql += " ORDER BY ts DESC LIMIT ?"
+        params.append(limit)
+        rows = db.fetchall(sql, tuple(params))
+        return {"data": rows, "total": len(rows)}
+
+    @app.get("/news")
+    def news_query(
+        day: Optional[str] = Query(None),
+        keyword: Optional[str] = Query(None),
+        source: Optional[str] = Query(None),
+        limit: int = Query(50),
+    ):
+        sql = "SELECT id, ts, catalog_name, title, body_text, source, url, created_at FROM news WHERE 1=1"
+        params = []
+        if day:
+            sql += " AND date(ts) = date(?)"
+            params.append(day)
+        if keyword:
+            sql += " AND (title LIKE ? OR body_text LIKE ?)"
+            params.extend([f"%{keyword}%", f"%{keyword}%"])
+        if source:
+            sql += " AND source = ?"
+            params.append(source)
+        sql += " ORDER BY ts DESC LIMIT ?"
+        params.append(limit)
+        rows = db.fetchall(sql, tuple(params))
+        return {"data": rows, "total": len(rows)}
+
     # ── Polymarket ──
 
     @app.get("/polymarket/latest")
@@ -472,6 +512,14 @@ def create_app(db: Database) -> FastAPI:
         )
         results.extend(rows)
 
+        rows = db.fetchall(
+            f"SELECT source, ts, catalog_name as author, title as text FROM news "
+            f"WHERE (title LIKE ? OR body_text LIKE ?) AND ts >= datetime('now', '-{hours} hours') "
+            f"ORDER BY ts DESC LIMIT ?",
+            (f"%{keyword}%", f"%{keyword}%", limit),
+        )
+        results.extend(rows)
+
         results.sort(key=lambda x: x.get("ts", ""), reverse=True)
         return {"data": results, "total": len(results)}
 
@@ -545,7 +593,16 @@ def create_app(db: Database) -> FastAPI:
             WHERE ts > ? AND ({topic_placeholders}){entity_filter}
         """)
 
-        all_params = per_query_params * 4 + [limit]
+        # news（一般媒体，从 announcements 拆出）
+        queries.append(f"""
+            SELECT 'news' AS source, ts, topics, entities,
+                   title || CASE WHEN body_text != '' THEN char(10) || SUBSTR(body_text, 1, 2000) ELSE '' END AS text,
+                   catalog_name || ' (' || source || ')' AS author, url
+            FROM news
+            WHERE ts > ? AND ({topic_placeholders}){entity_filter}
+        """)
+
+        all_params = per_query_params * 5 + [limit]
         sql = " UNION ALL ".join(queries) + " ORDER BY ts DESC LIMIT ?"
         rows = db.fetchall(sql, tuple(all_params))
         return {"data": rows, "total": len(rows)}

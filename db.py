@@ -141,7 +141,7 @@ class Database:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_dy_chain ON defi_yields(chain, snapshot_date DESC)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_dy_asset ON defi_yields(asset_type, snapshot_date DESC)")
 
-        # ── Binance 公告 ──
+        # ── 交易所公告（Binance/OKX/Hyperliquid） ──
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS announcements (
@@ -188,6 +188,29 @@ class Database:
             cur.execute("ALTER TABLE announcements ADD COLUMN entities TEXT DEFAULT ''")
         except Exception:
             pass  # 已存在
+
+        # ── News（一般媒体，从 announcements 拆出） ──
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS news (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TIMESTAMP NOT NULL,
+                catalog_id INTEGER,
+                catalog_name TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT,
+                body_text TEXT,
+                code TEXT DEFAULT '',
+                source TEXT DEFAULT '',
+                url TEXT DEFAULT '',
+                topics TEXT DEFAULT '',
+                entities TEXT DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_news_ts ON news(ts DESC)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_news_source ON news(source, ts DESC)")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_news_dedup ON news(title, ts, source)")
 
         # ── Tweets (KB API) ──
 

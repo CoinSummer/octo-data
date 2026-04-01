@@ -1,7 +1,7 @@
 """Odaily Seer 快讯 Fetcher — 轮询 Telegram 公开频道
 
 数据源：https://t.me/s/Odaily_Seer（服务端渲染 HTML，无需认证）
-写入 announcements 表，source='odaily'。
+写入 news 表，source='odaily'。
 """
 
 import logging
@@ -90,7 +90,7 @@ class OdailyAnnouncementsFetcher(BaseFetcher):
             url = f"https://t.me/{CHANNEL_NAME}/{post_id}" if post_id else ""
 
             self.db.execute("""
-                INSERT OR IGNORE INTO announcements
+                INSERT OR IGNORE INTO news
                     (ts, catalog_id, catalog_name, title, body, body_text, code, source, url)
                 VALUES (?, 0, 'Odaily', ?, '', ?, ?, 'odaily', ?)
             """, (ts, title, body_text, post_id, url))

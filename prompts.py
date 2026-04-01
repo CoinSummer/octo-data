@@ -6,17 +6,18 @@
 
 CLASSIFIER_MODEL = "haiku"
 CLASSIFIER_BATCH_SIZE = 20
-VALID_TOPICS = {"defi", "earn", "crypto", "stock", "macro", "ai"}
+VALID_TOPICS = {"defi", "earn", "crypto", "stock", "macro", "ai", "tech"}
 
 CLASSIFY_PROMPT = """对以下文本打标签并提取实体。
 
-## 标签（topics）— 从这 6 个中选，可多选
+## 标签（topics）— 从这 7 个中选，可多选
 - defi: DeFi 协议动态（yield/tvl/staking/lending/pool/swap/链上协议/Morpho/Pendle/Aave/Uniswap 等）
 - earn: **可操作的收益机会**（有明确 APR/APY/收益率 + 参与方式），或**影响收益策略的规则变更**（资金费率/保证金/结算频率/费率上下限/杠杆调整等衍生品交易规则）。注意：代币上线、法币通道、支付方式、系统维护、App 更新等运营公告不是 earn
 - crypto: 泛 crypto（BTC/ETH/交易所/监管/空投/安全/链上事件/爆仓/鲸鱼/代币上线 等）
 - stock: 股票/财报/估值/IPO/美股/港股
 - macro: 美联储/CPI/PPI/利率/关税/地缘政治/油价/黄金
 - ai: AI/大模型/算力/Agent
+- tech: 科技商业/消费/SaaS/硬件/汽车/电商/社交/游戏/物流/零售/医疗科技等产业动态（不属于上述 6 类但与科技公司相关的）
 
 ## 实体（entities）— 提取文本中提到的具体名称
 提取：代币（BTC/ETH/USDC/sRUSDe…）、协议（Pendle/Aave/Morpho…）、交易所（Binance/Hyperliquid…）、链（Ethereum/Solana/Arbitrum…）、人物、公司
@@ -40,6 +41,7 @@ CLASSIFY_PROMPT = """对以下文本打标签并提取实体。
 TEXT_TABLES = [
     ("tweets", "content", "id"),
     ("announcements", "title || ' ' || COALESCE(body_text, '')", "id"),
+    ("news", "title || ' ' || COALESCE(body_text, '')", "id"),
     ("reddit_posts", "title", "id"),
     ("kb_news", "subject || ' ' || COALESCE(SUBSTR(content, 1, 200), '')", "id"),
 ]
