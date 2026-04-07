@@ -105,29 +105,45 @@ def main():
         ann_fetcher = AnnouncementsFetcher(db)
         ann_fetcher.start()
 
-    # 3. 启动 Slack Bot（独立子进程，避免模块名冲突）
+    # 3. 回调 Bot（NOTIFY_CHANNEL=slack|telegram 切换）
     from config import EXTERNAL_SCRIPTS_DIR
     import os as _os
+    _notify_channel = _os.environ.get("NOTIFY_CHANNEL", "slack")
     if EXTERNAL_SCRIPTS_DIR:
-        _slack_env = _os.environ.copy()
-        _slack_env.setdefault("HOME", str(Path.home()))
+        _bot_env = _os.environ.copy()
+        _bot_env.setdefault("HOME", str(Path.home()))
         _log_dir = Path(__file__).parent
-        _slack_proc = subprocess.Popen(
-            [sys.executable, "-c",
-             "import sys, logging; "
-             f"sys.path.insert(0, {EXTERNAL_SCRIPTS_DIR!r}); "
-             "logging.basicConfig(level=logging.INFO, "
-             "format='%(asctime)s [%(levelname)s] %(name)s: %(message)s', "
-             "datefmt='%H:%M:%S'); "
-             "from slack_bot import SlackBot; bot = SlackBot(); bot._run()"],
-            env=_slack_env,
-            stdout=open(_log_dir / "slack_bot.log", "a"),
-            stderr=subprocess.STDOUT,
-        )
-        logger.info(f"Slack bot subprocess started (pid={_slack_proc.pid})")
+        if _notify_channel == "telegram":
+            _bot_proc = subprocess.Popen(
+                [sys.executable, "-c",
+                 "import sys, logging; "
+                 f"sys.path.insert(0, {EXTERNAL_SCRIPTS_DIR!r}); "
+                 "logging.basicConfig(level=logging.INFO, "
+                 "format='%(asctime)s [%(levelname)s] %(name)s: %(message)s', "
+                 "datefmt='%H:%M:%S'); "
+                 "from tg_bot import TelegramBot; bot = TelegramBot(); bot._run()"],
+                env=_bot_env,
+                stdout=open(_log_dir / "tg_bot.log", "a"),
+                stderr=subprocess.STDOUT,
+            )
+            logger.info(f"TG callback bot started (pid={_bot_proc.pid})")
+        else:
+            _bot_proc = subprocess.Popen(
+                [sys.executable, "-c",
+                 "import sys, logging; "
+                 f"sys.path.insert(0, {EXTERNAL_SCRIPTS_DIR!r}); "
+                 "logging.basicConfig(level=logging.INFO, "
+                 "format='%(asctime)s [%(levelname)s] %(name)s: %(message)s', "
+                 "datefmt='%H:%M:%S'); "
+                 "from slack_bot import SlackBot; bot = SlackBot(); bot._run()"],
+                env=_bot_env,
+                stdout=open(_log_dir / "slack_bot.log", "a"),
+                stderr=subprocess.STDOUT,
+            )
+            logger.info(f"Slack bot started (pid={_bot_proc.pid})")
     else:
-        _slack_proc = None
-        logger.info("Slack bot skipped (DATAHUB_SCRIPTS_DIR not set)")
+        _bot_proc = None
+        logger.info("Callback bot skipped (EXTERNAL_SCRIPTS_DIR not set)")
 
     # 4. 启动 API server（主线程，阻塞）
     app = create_app(db)

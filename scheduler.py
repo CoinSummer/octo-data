@@ -85,8 +85,7 @@ def start_scheduler(db: Database) -> BackgroundScheduler:
     def _make_subprocess_env():
         import os
         env = os.environ.copy()
-        for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
-            env.pop(k, None)
+        # 保留 proxy（TG 通知需要），用 NO_PROXY 跳过本地 API 调用
         env["NO_PROXY"] = "localhost,127.0.0.1"
         return env
 
@@ -97,7 +96,7 @@ def start_scheduler(db: Database) -> BackgroundScheduler:
                     [sys.executable,
                      str(Path(EXTERNAL_SCRIPTS_DIR) / "analyzers" / "defi_monitor.py"),
                      "--hours", "4"],
-                    capture_output=True, text=True, timeout=300,
+                    capture_output=True, text=True, timeout=1200,
                     env=_make_subprocess_env(), cwd=EXTERNAL_SCRIPTS_DIR,
                 )
                 logger.info(f"[defi_monitor] {result.stdout.strip()}")
@@ -124,7 +123,7 @@ def start_scheduler(db: Database) -> BackgroundScheduler:
                     [sys.executable,
                      str(Path(EXTERNAL_SCRIPTS_DIR) / "analyzers" / "crypto_monitor.py"),
                      "--hours", "4"],
-                    capture_output=True, text=True, timeout=300,
+                    capture_output=True, text=True, timeout=1200,
                     env=_make_subprocess_env(), cwd=EXTERNAL_SCRIPTS_DIR,
                 )
                 logger.info(f"[crypto_monitor] {result.stdout.strip()}")
@@ -144,6 +143,34 @@ def start_scheduler(db: Database) -> BackgroundScheduler:
         )
         logger.info("Scheduled [crypto_monitor] every 4h")
 
+        # Crypto Holdings Monitor — 每 6h 运行（持仓假设驱动，与 crypto monitor 错开 2h）
+        def _run_crypto_holdings_monitor():
+            try:
+                result = subprocess.run(
+                    [sys.executable,
+                     str(Path(EXTERNAL_SCRIPTS_DIR) / "analyzers" / "crypto_holdings_monitor.py"),
+                     "--hours", "6"],
+                    capture_output=True, text=True, timeout=1200,
+                    env=_make_subprocess_env(), cwd=EXTERNAL_SCRIPTS_DIR,
+                )
+                logger.info(f"[crypto_holdings_monitor] {result.stdout.strip()}")
+                if result.returncode != 0:
+                    logger.error(f"[crypto_holdings_monitor] stderr: {result.stderr[:500]}")
+            except Exception as e:
+                logger.error(f"[crypto_holdings_monitor] failed: {e}")
+
+        scheduler.add_job(
+            _run_crypto_holdings_monitor,
+            trigger="interval",
+            seconds=6 * 3600,
+            next_run_time=datetime.now() + timedelta(hours=2),
+            id="crypto_holdings_monitor",
+            name="crypto_holdings_monitor",
+            replace_existing=True,
+            misfire_grace_time=300,
+        )
+        logger.info("Scheduled [crypto_holdings_monitor] every 6h (offset +2h)")
+
         # Stock Monitor — 每 12h 运行（河流模型持仓信号监控）
         def _run_stock_monitor():
             try:
@@ -151,7 +178,7 @@ def start_scheduler(db: Database) -> BackgroundScheduler:
                     [sys.executable,
                      str(Path(EXTERNAL_SCRIPTS_DIR) / "analyzers" / "stock_monitor.py"),
                      "--hours", "12"],
-                    capture_output=True, text=True, timeout=300,
+                    capture_output=True, text=True, timeout=1200,
                     env=_make_subprocess_env(), cwd=EXTERNAL_SCRIPTS_DIR,
                 )
                 logger.info(f"[stock_monitor] {result.stdout.strip()}")

@@ -21,6 +21,7 @@ FEEDS = [
     ("techcrunch", "媒体", "https://techcrunch.com/feed/"),
     ("hackernews", "媒体", "https://hnrss.org/best"),
     ("meta_engineering", "媒体", "https://engineering.fb.com/feed/"),
+    ("rekt_news", "安全", "https://rekt.news/feed/"),
 ]
 
 
