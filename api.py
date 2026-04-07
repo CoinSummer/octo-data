@@ -450,8 +450,28 @@ def create_app(db: Database) -> FastAPI:
     @app.get("/reddit/latest")
     def reddit_latest(limit: int = Query(30)):
         rows = db.fetchall(
-            "SELECT ts, subreddit, title, author, url FROM reddit_posts ORDER BY ts DESC LIMIT ?",
+            "SELECT ts, subreddit, title, author, url, sentiment FROM reddit_posts ORDER BY ts DESC LIMIT ?",
             (limit,),
+        )
+        return {"data": rows, "total": len(rows)}
+
+    @app.get("/reddit/sentiment")
+    def reddit_sentiment(hours: int = Query(24)):
+        """Reddit 情绪 v2 加权聚合。headline 0-100 + detail panel。"""
+        from aggregator import compute_sentiment
+        result = compute_sentiment(db, hours)
+        if not result:
+            return {"data": None, "message": "No scored posts in timeframe"}
+        return {"data": result}
+
+    @app.get("/reddit/trend")
+    def reddit_trend(days: int = Query(30)):
+        """Reddit 情绪日度趋势（从 reddit_sentiment_daily）。"""
+        rows = db.fetchall(
+            "SELECT date, score, weighted_avg, bull_bear_spread, post_count, "
+            "btc_price, fng FROM reddit_sentiment_daily "
+            "ORDER BY date DESC LIMIT ?",
+            (days,),
         )
         return {"data": rows, "total": len(rows)}
 
@@ -461,7 +481,7 @@ def create_app(db: Database) -> FastAPI:
         subreddit: Optional[str] = Query(None),
         limit: int = Query(50),
     ):
-        sql = "SELECT ts, subreddit, title, author, url FROM reddit_posts WHERE 1=1"
+        sql = "SELECT ts, subreddit, title, author, url, sentiment FROM reddit_posts WHERE 1=1"
         params = []
         if keyword:
             sql += " AND title LIKE ?"

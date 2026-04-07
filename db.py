@@ -286,6 +286,41 @@ class Database:
         except Exception:
             pass
 
+        # 确保 reddit_posts 有 sentiment 列（-2 到 +2）
+        try:
+            cur.execute("ALTER TABLE reddit_posts ADD COLUMN sentiment INTEGER DEFAULT NULL")
+        except Exception:
+            pass
+
+        # 确保 reddit_posts 有 explicitness 列（strong/moderate/weak）
+        try:
+            cur.execute("ALTER TABLE reddit_posts ADD COLUMN explicitness TEXT DEFAULT NULL")
+        except Exception:
+            pass
+
+        # ── Reddit Sentiment 日度快照 ──
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS reddit_sentiment_daily (
+                date TEXT PRIMARY KEY,
+                score REAL NOT NULL,
+                weighted_avg REAL,
+                bull_bear_spread REAL,
+                post_count INTEGER,
+                total_comments INTEGER,
+                total_upvotes INTEGER,
+                post_volume_z REAL,
+                comment_volume_z REAL,
+                engagement_per_post_z REAL,
+                rvs_aligned INTEGER,
+                by_subreddit TEXT,
+                by_topic TEXT,
+                btc_price REAL,
+                fng INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         # ── Polymarket ──
 
         cur.execute("""

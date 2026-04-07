@@ -412,17 +412,42 @@ def cmd_reddit(args):
             if a == "--limit" and i < len(args):
                 limit = int(args[i + 1])
         return db.fetchall(
-            "SELECT ts, subreddit, title, author, url FROM reddit_posts ORDER BY ts DESC LIMIT ?",
+            "SELECT ts, subreddit, title, author, url, sentiment FROM reddit_posts ORDER BY ts DESC LIMIT ?",
             (limit,),
         )
 
     elif sub == "search" and len(args) > 1:
         keyword = args[1]
         return db.fetchall(
-            "SELECT ts, subreddit, title, author, url FROM reddit_posts "
+            "SELECT ts, subreddit, title, author, url, sentiment FROM reddit_posts "
             "WHERE title LIKE ? ORDER BY ts DESC LIMIT 50",
             (f"%{keyword}%",),
         )
+
+    elif sub == "sentiment":
+        from aggregator import compute_sentiment
+        hours = 24
+        for i, a in enumerate(args[1:], 1):
+            if a == "--hours" and i < len(args):
+                hours = int(args[i + 1])
+        return compute_sentiment(db, hours) or {"message": f"No scored posts in last {hours}h"}
+
+    elif sub == "snapshot":
+        from aggregator import save_daily_snapshot
+        ok = save_daily_snapshot(db)
+        return {"saved": ok}
+
+    elif sub == "trend":
+        days = 30
+        for i, a in enumerate(args[1:], 1):
+            if a == "--days" and i < len(args):
+                days = int(args[i + 1])
+        rows = db.fetchall(
+            "SELECT date, score, weighted_avg, bull_bear_spread, post_count, btc_price, fng "
+            "FROM reddit_sentiment_daily ORDER BY date DESC LIMIT ?",
+            (days,),
+        )
+        return rows
 
     return []
 

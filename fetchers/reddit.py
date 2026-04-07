@@ -10,7 +10,16 @@ from .base import BaseFetcher
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SUBREDDITS = ["cryptocurrency", "wallstreetbets"]
+DEFAULT_SUBREDDITS = [
+    "cryptocurrency",
+    "wallstreetbets",
+    "bitcoin",
+    "ethereum",
+    "bitcoinmarkets",
+    "defi",
+    "stocks",
+    "investing",
+]
 POSTS_PER_SUB = 25
 
 NS = {"atom": "http://www.w3.org/2005/Atom"}
