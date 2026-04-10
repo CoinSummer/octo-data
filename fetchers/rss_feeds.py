@@ -22,6 +22,9 @@ FEEDS = [
     ("hackernews", "媒体", "https://hnrss.org/best"),
     ("meta_engineering", "媒体", "https://engineering.fb.com/feed/"),
     ("rekt_news", "安全", "https://rekt.news/feed/"),
+    ("immunefi", "安全", "https://immunefi.com/blog/feed/"),
+    ("chainalysis", "安全", "https://www.chainalysis.com/blog/feed/"),
+    ("anthropic", "AI", "https://raw.githubusercontent.com/taobojlen/anthropic-rss-feed/main/anthropic_news_rss.xml"),
 ]
 
 
