@@ -5,8 +5,199 @@ from typing import Optional
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from db import Database
+
+
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Octo-Data 信源看板</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#e6edf3;--dim:#8b949e;--green:#3fb950;--yellow:#d29922;--red:#f85149;--blue:#58a6ff;--purple:#bc8cff}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;padding:20px}
+h1{font-size:20px;font-weight:600;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+h2{font-size:15px;font-weight:600;margin-bottom:10px;color:var(--dim)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px}
+.card-full{grid-column:1/-1}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);color:var(--dim);font-weight:500}
+td{padding:6px 8px;border-bottom:1px solid var(--border)}
+tr:last-child td{border-bottom:none}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.dot-green{background:var(--green)}.dot-yellow{background:var(--yellow)}.dot-red{background:var(--red)}
+.tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;margin:1px 2px;background:var(--border);color:var(--text)}
+.tag-defi{background:#1f3a2a;color:var(--green)}.tag-earn{background:#2a3a1f;color:#7ee787}
+.tag-crypto{background:#1f2a3a;color:var(--blue)}.tag-security{background:#3a1f1f;color:var(--red)}
+.tag-macro{background:#3a2a1f;color:var(--yellow)}.tag-stock{background:#2a1f3a;color:var(--purple)}
+.tag-ai{background:#1f3a3a;color:#56d4dd}.tag-tech{background:#2a2a1f;color:#d2a822}
+.bar-bg{background:var(--border);border-radius:3px;height:6px;width:100%;margin-top:4px}
+.bar-fill{background:var(--green);border-radius:3px;height:6px;transition:width .3s}
+.mono{font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px}
+.text-dim{color:var(--dim)}.text-green{color:var(--green)}.text-red{color:var(--red)}.text-yellow{color:var(--yellow)}
+.err{font-size:11px;color:var(--red);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.preview{max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stats{display:flex;gap:24px;margin-bottom:12px}
+.stat-item{text-align:center}.stat-val{font-size:22px;font-weight:700}.stat-label{font-size:12px;color:var(--dim)}
+.refresh{font-size:12px;color:var(--dim);margin-left:auto}
+.source-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.source-header h2{margin-bottom:0}
+.source-count{font-size:12px;color:var(--dim)}
+.topic-dist{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+</style>
+</head>
+<body>
+<h1>Octo-Data 信源看板 <span class="refresh" id="timer">60s</span></h1>
+
+<div class="stats" id="overview"></div>
+
+<div class="card card-full" style="margin-bottom:16px">
+<h2>Fetcher 状态</h2>
+<table><thead><tr><th>名称</th><th>状态</th><th>最近运行</th><th>成功次数</th><th>错误</th><th>最近错误</th></tr></thead>
+<tbody id="fetchers"></tbody></table>
+</div>
+
+<div class="card card-full" style="margin-bottom:16px">
+<h2>分类覆盖率</h2>
+<table><thead><tr><th>数据表</th><th>总量</th><th>已分类</th><th>覆盖率</th><th>最新数据</th><th>Topic 分布</th></tr></thead>
+<tbody id="classifier"></tbody></table>
+</div>
+
+<div class="grid" id="sources"></div>
+
+<script>
+const CONTENT_SOURCES=[
+  {key:'tweets',label:'Tweets',endpoint:'/tweets/latest?limit=3',textField:'content',authorField:'username',tsField:'ts'},
+  {key:'kb_news',label:'KB News',endpoint:'/kb-news/latest?limit=3',textField:'subject',authorField:'source_name',tsField:'ts'},
+  {key:'announcements',label:'公告',endpoint:'/announcements/latest?limit=3',textField:'title',authorField:'source',tsField:'ts'},
+  {key:'news',label:'News/RSS',endpoint:'/news/latest?limit=3',textField:'title',authorField:'source',tsField:'ts'},
+  {key:'reddit_posts',label:'Reddit',endpoint:'/reddit/latest?limit=3',textField:'title',authorField:'author',tsField:'ts'},
+];
+
+function ago(ts){
+  if(!ts)return'-';
+  const d=new Date(ts+'Z'),now=new Date(),diff=(now-d)/1000;
+  if(diff<60)return Math.floor(diff)+'s ago';
+  if(diff<3600)return Math.floor(diff/60)+'m ago';
+  if(diff<86400)return Math.floor(diff/3600)+'h ago';
+  return Math.floor(diff/86400)+'d ago';
+}
+
+function localTS(ts){
+  if(!ts)return'-';
+  try{const d=new Date(ts.includes('T')?ts:ts+'Z');return d.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(e){return ts}
+}
+
+function topicTag(t){return `<span class="tag tag-${t}">${t}</span>`}
+
+function topicTags(topics){
+  if(!topics||topics==='_none')return'<span class="text-dim">-</span>';
+  return topics.split(',').map(t=>t.trim()).filter(Boolean).map(topicTag).join('');
+}
+
+async function loadStatus(){
+  const r=await fetch('/status');const d=await r.json();
+  const fetchers=d.fetchers||[];const tables=d.tables||[];
+  const totalRows=tables.reduce((s,t)=>s+t.count,0);
+  const classifier=fetchers.find(f=>f.name==='classifier');
+  const healthyCount=fetchers.filter(f=>f.error_count===0).length;
+
+  document.getElementById('overview').innerHTML=`
+    <div class="stat-item"><div class="stat-val">${fetchers.length}</div><div class="stat-label">Fetchers</div></div>
+    <div class="stat-item"><div class="stat-val text-green">${healthyCount}</div><div class="stat-label">健康</div></div>
+    <div class="stat-item"><div class="stat-val">${(totalRows/1000).toFixed(1)}k</div><div class="stat-label">总记录</div></div>
+    <div class="stat-item"><div class="stat-val">${classifier?ago(classifier.last_run):'-'}</div><div class="stat-label">Classifier</div></div>
+  `;
+
+  const tbody=document.getElementById('fetchers');
+  tbody.innerHTML=fetchers.map(f=>{
+    const isOk=f.error_count===0;
+    const dotClass=isOk?'dot-green':f.error_count>100?'dot-red':'dot-yellow';
+    return `<tr>
+      <td><span class="dot ${dotClass}"></span>${f.name}</td>
+      <td class="${isOk?'text-green':'text-yellow'}">${isOk?'OK':'⚠ '+f.error_count}</td>
+      <td class="mono">${localTS(f.last_run)}</td>
+      <td class="mono">${f.run_count}</td>
+      <td class="mono">${f.error_count}</td>
+      <td class="err" title="${(f.last_error||'').replace(/"/g,'&quot;')}">${f.last_error ? '<span class="text-dim" style="margin-right:4px">' + localTS(f.last_error_at) + '</span>' + f.last_error : '-'}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadClassifier(){
+  const r=await fetch('/classifier/stats');const d=await r.json();
+  const tbody=document.getElementById('classifier');
+  tbody.innerHTML=(d.data||[]).map(t=>{
+    const pct=t.coverage_pct;
+    const barColor=pct>95?'var(--green)':pct>80?'var(--yellow)':'var(--red)';
+    const distHtml=Object.entries(t.topics_dist||{}).sort((a,b)=>b[1]-a[1])
+      .map(([k,v])=>`<span class="tag tag-${k}">${k}: ${v}</span>`).join('');
+    return `<tr>
+      <td>${t.table}</td>
+      <td class="mono">${t.total.toLocaleString()}</td>
+      <td class="mono">${t.classified.toLocaleString()}</td>
+      <td><div style="display:flex;align-items:center;gap:8px"><span class="mono">${pct}%</span><div class="bar-bg" style="width:80px"><div class="bar-fill" style="width:${pct}%;background:${barColor}"></div></div></div></td>
+      <td class="mono">${ago(t.latest_ts)}</td>
+      <td><div class="topic-dist">${distHtml||'-'}</div></td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadSources(){
+  const container=document.getElementById('sources');
+  container.innerHTML='';
+  for(const src of CONTENT_SOURCES){
+    try{
+      const r=await fetch(src.endpoint);const d=await r.json();
+      const items=d.data||[];const total=d.total||items.length;
+      let rows='';
+      if(items.length===0){
+        rows='<tr><td colspan="3" class="text-dim" style="text-align:center">暂无数据</td></tr>';
+      }else{
+        rows=items.map(item=>{
+          const text=item[src.textField]||item.title||item.content||item.subject||'';
+          const author=item[src.authorField]||'';
+          const ts=item[src.tsField]||'';
+          const topics=item.topics||'';
+          return `<tr>
+            <td class="mono" style="white-space:nowrap">${localTS(ts)}</td>
+            <td><div class="preview">${text.substring(0,80)}</div><div style="margin-top:2px">${topicTags(topics)}</div></td>
+            <td class="text-dim">${author}</td>
+          </tr>`;
+        }).join('');
+      }
+      container.innerHTML+=`<div class="card">
+        <div class="source-header"><h2>${src.label}</h2><span class="source-count">${total.toLocaleString()} 条</span></div>
+        <table><thead><tr><th style="width:90px">时间</th><th>内容</th><th style="width:80px">来源</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      </div>`;
+    }catch(e){
+      container.innerHTML+=`<div class="card"><h2>${src.label}</h2><p class="text-red">加载失败: ${e.message}</p></div>`;
+    }
+  }
+}
+
+let countdown=60;
+function tick(){
+  countdown--;
+  document.getElementById('timer').textContent=countdown+'s';
+  if(countdown<=0){countdown=60;refresh();}
+}
+
+async function refresh(){
+  await Promise.all([loadStatus(),loadClassifier(),loadSources()]);
+}
+
+refresh();
+setInterval(tick,1000);
+</script>
+</body>
+</html>"""
 
 
 def create_app(db: Database) -> FastAPI:
@@ -684,5 +875,52 @@ def create_app(db: Database) -> FastAPI:
                 (status, limit),
             )
         return {"data": rows}
+
+    # ── Classifier Stats ──
+
+    @app.get("/classifier/stats")
+    def classifier_stats():
+        """各内容表的分类覆盖率 + topic 分布。"""
+        content_tables = {
+            "tweets": "content",
+            "announcements": "title",
+            "news": "title",
+            "reddit_posts": "title",
+            "kb_news": "subject",
+        }
+        valid_topics = ["defi", "earn", "crypto", "stock", "macro", "ai", "tech", "security"]
+        results = []
+        for table, text_col in content_tables.items():
+            row = db.fetchone(f"""
+                SELECT COUNT(*) as total,
+                       SUM(CASE WHEN topics != '' AND topics IS NOT NULL AND topics != '_none' THEN 1 ELSE 0 END) as classified
+                FROM {table}
+            """)
+            total = row["total"] if row else 0
+            classified = row["classified"] if row else 0
+            # topic 分布
+            topics_dist = {}
+            for t in valid_topics:
+                cnt = db.fetchone(f"SELECT COUNT(*) as c FROM {table} WHERE topics LIKE ?", (f"%{t}%",))
+                if cnt and cnt["c"] > 0:
+                    topics_dist[t] = cnt["c"]
+            # 最新数据时间
+            latest = db.fetchone(f"SELECT ts FROM {table} ORDER BY ts DESC LIMIT 1")
+            results.append({
+                "table": table,
+                "total": total,
+                "classified": classified,
+                "unclassified": total - classified,
+                "coverage_pct": round(classified / total * 100, 1) if total > 0 else 0,
+                "latest_ts": latest["ts"] if latest else None,
+                "topics_dist": topics_dist,
+            })
+        return {"data": results}
+
+    # ── Dashboard ──
+
+    @app.get("/dashboard", response_class=HTMLResponse)
+    def dashboard():
+        return DASHBOARD_HTML
 
     return app

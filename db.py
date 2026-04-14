@@ -2,6 +2,7 @@
 
 import sqlite3
 import logging
+import threading
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -9,18 +10,40 @@ from config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
+# SQLite WAL 模式下写冲突等待时间（ms）
+_BUSY_TIMEOUT_MS = 10_000
+
 
 class Database:
+    """线程安全的 SQLite 封装 — 每线程独立连接 + WAL mode。
+
+    APScheduler 的 BackgroundScheduler 会在线程池中并发调用 fetcher，
+    单连接 + check_same_thread=False 会导致事务交叉。
+    改为 threading.local() 确保每线程拿到自己的连接。
+    """
+
     def __init__(self, path: Optional[Path] = None):
         self.path = path or DB_PATH
-        self.conn = None
+        self._local = threading.local()
+        self._init_done = False
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """获取当前线程的 SQLite 连接，不存在则创建。"""
+        c = getattr(self._local, "conn", None)
+        if c is None:
+            c = sqlite3.connect(str(self.path), timeout=_BUSY_TIMEOUT_MS / 1000)
+            c.row_factory = sqlite3.Row
+            c.execute("PRAGMA journal_mode=WAL")
+            c.execute("PRAGMA foreign_keys=ON")
+            c.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+            self._local.conn = c
+        return c
 
     def connect(self):
-        self.conn = sqlite3.connect(str(self.path), check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA foreign_keys=ON")
+        # 在主线程初始化表结构（只需一次）
         self._init_tables()
+        self._init_done = True
         logger.info(f"Database connected: {self.path}")
 
     def _init_tables(self):
@@ -351,9 +374,22 @@ class Database:
                 last_run TIMESTAMP,
                 last_success TIMESTAMP,
                 last_error TEXT,
+                last_error_at TIMESTAMP,
                 run_count INTEGER DEFAULT 0,
                 error_count INTEGER DEFAULT 0
             )
+        """)
+
+        # 兼容旧表：加 last_error_at 列
+        try:
+            cur.execute("ALTER TABLE fetcher_status ADD COLUMN last_error_at TIMESTAMP")
+        except Exception:
+            pass  # 已存在
+        # 回填存量错误行：last_error_at 缺失时用 last_run 近似
+        cur.execute("""
+            UPDATE fetcher_status
+            SET last_error_at = last_run
+            WHERE last_error IS NOT NULL AND last_error_at IS NULL
         """)
 
         # ── 交易所指标（DEX/CEX 渗透率 + HYPE 份额）──
@@ -409,17 +445,17 @@ class Database:
         self.conn.commit()
 
     def fetchall(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
-        cur = self.execute(sql, params)
+        cur = self.conn.execute(sql, params)
         return [dict(row) for row in cur.fetchall()]
 
     def fetchone(self, sql: str, params: tuple = ()) -> Optional[Dict[str, Any]]:
-        cur = self.execute(sql, params)
+        cur = self.conn.execute(sql, params)
         row = cur.fetchone()
         return dict(row) if row else None
 
     def update_fetcher_status(self, name: str, success: bool, error: Optional[str] = None):
         if success:
-            self.execute("""
+            self.conn.execute("""
                 INSERT INTO fetcher_status (name, last_run, last_success, run_count, error_count)
                 VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, 0)
                 ON CONFLICT(name) DO UPDATE SET
@@ -428,16 +464,17 @@ class Database:
                     run_count = run_count + 1
             """, (name,))
         else:
-            self.execute("""
-                INSERT INTO fetcher_status (name, last_run, last_error, run_count, error_count)
-                VALUES (?, CURRENT_TIMESTAMP, ?, 1, 1)
+            self.conn.execute("""
+                INSERT INTO fetcher_status (name, last_run, last_error, last_error_at, run_count, error_count)
+                VALUES (?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, 1, 1)
                 ON CONFLICT(name) DO UPDATE SET
                     last_run = CURRENT_TIMESTAMP,
                     last_error = ?,
+                    last_error_at = CURRENT_TIMESTAMP,
                     run_count = run_count + 1,
                     error_count = error_count + 1
             """, (name, error, error))
-        self.commit()
+        self.conn.commit()
 
     def table_stats(self) -> List[Dict[str, Any]]:
         tables = [
@@ -453,5 +490,7 @@ class Database:
         return stats
 
     def close(self):
-        if self.conn:
-            self.conn.close()
+        c = getattr(self._local, "conn", None)
+        if c:
+            c.close()
+            self._local.conn = None

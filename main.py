@@ -10,11 +10,21 @@
 
 import argparse
 import logging
+import resource
 import subprocess
 import sys
 from pathlib import Path
 
 import uvicorn
+
+# 提高 fd 上限：macOS 默认 soft limit 仅 256，长时间运行会 Errno 24
+try:
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    _target = min(65536, _hard) if _hard > 0 else 65536
+    if _soft < _target:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (_target, _hard))
+except (ValueError, OSError):
+    pass  # 失败不阻塞启动
 
 from config import API_HOST, API_PORT
 from db import Database
